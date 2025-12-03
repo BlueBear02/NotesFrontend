@@ -7,6 +7,7 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/database_helper.dart';
 import '../services/sync_service.dart';
+import '../services/preferences_service.dart';
 import '../widgets/custom_title_bar.dart';
 import 'note_form_screen.dart';
 import 'desktop_notes_screen.dart';
@@ -22,13 +23,14 @@ class _HomeScreenState extends State<HomeScreen> {
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
   final SyncService _syncService = SyncService.instance;
   final AuthService _authService = AuthService.instance;
+  final PreferencesService _prefsService = PreferencesService.instance;
   List<Note> _notes = [];
   bool _isLoading = true;
   String _syncStatus = '';
   String? _errorMessage;
 
   // Filter and sort
-  String _filterMode = 'All'; // 'All' or category name
+  Set<String> _selectedCategories = {}; // Multi-select: empty = show all
   String _sortBy = 'updated'; // 'created', 'updated', 'category', 'title'
   String _sortOrder = 'desc'; // 'asc' or 'desc'
   bool _showHiddenNotes = false;
@@ -38,10 +40,23 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _loadNotesFromLocal().then((_) {
-      // Load notes first, then sync in background without blocking UI
-      _syncInBackground();
+    _loadSelectedCategories().then((_) {
+      _loadNotesFromLocal().then((_) {
+        // Load notes first, then sync in background without blocking UI
+        _syncInBackground();
+      });
     });
+  }
+
+  Future<void> _loadSelectedCategories() async {
+    final categories = await _prefsService.loadSelectedCategories();
+    setState(() {
+      _selectedCategories = categories;
+    });
+  }
+
+  Future<void> _saveSelectedCategories() async {
+    await _prefsService.saveSelectedCategories(_selectedCategories);
   }
 
   Future<void> _syncInBackground() async {
@@ -98,6 +113,13 @@ class _HomeScreenState extends State<HomeScreen> {
         .where((note) => note.category != null && note.category!.isNotEmpty)
         .map((note) => note.category!)
         .toSet();
+
+    // Add "Uncategorised" if there are notes without a category
+    final hasUncategorised = _notes.any((note) => note.category == null || note.category!.isEmpty);
+    if (hasUncategorised) {
+      categories.add('Uncategorised');
+    }
+
     setState(() {
       _availableCategories = categories;
     });
@@ -118,9 +140,18 @@ class _HomeScreenState extends State<HomeScreen> {
       filtered = filtered.where((note) => note.isFavourite).toList();
     }
 
-    // Apply category filter
-    if (_filterMode != 'All') {
-      filtered = filtered.where((note) => note.category == _filterMode).toList();
+    // Apply category filter: if categories selected, show only those
+    if (_selectedCategories.isNotEmpty) {
+      filtered = filtered.where((note) {
+        if (_selectedCategories.contains('Uncategorised')) {
+          // Show uncategorised notes or notes in other selected categories
+          return (note.category == null || note.category!.isEmpty) ||
+                 (note.category != null && _selectedCategories.contains(note.category));
+        } else {
+          // Show only notes in selected categories
+          return note.category != null && _selectedCategories.contains(note.category);
+        }
+      }).toList();
     }
 
     // Apply sort
@@ -324,6 +355,70 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Future<void> _showCategoryFilterDialog() async {
+    final tempSelected = Set<String>.from(_selectedCategories);
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Filter Categories'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: _availableCategories.isEmpty
+                ? const Text('No categories available')
+                : ListView(
+                    shrinkWrap: true,
+                    children: [
+                      CheckboxListTile(
+                        title: const Text('Show All', style: TextStyle(fontWeight: FontWeight.bold)),
+                        value: tempSelected.isEmpty,
+                        onChanged: (checked) {
+                          setDialogState(() {
+                            if (checked == true) {
+                              tempSelected.clear();
+                            }
+                          });
+                        },
+                      ),
+                      const Divider(),
+                      ..._availableCategories.map((category) => CheckboxListTile(
+                        title: Text(category),
+                        value: tempSelected.contains(category),
+                        onChanged: (checked) {
+                          setDialogState(() {
+                            if (checked == true) {
+                              tempSelected.add(category);
+                            } else {
+                              tempSelected.remove(category);
+                            }
+                          });
+                        },
+                      )),
+                    ],
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _selectedCategories = tempSelected;
+                });
+                _saveSelectedCategories();
+                Navigator.pop(context);
+              },
+              child: const Text('Apply'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _toggleShowHiddenNotes() async {
     if (!_showHiddenNotes) {
       // Trying to show hidden notes - require authentication
@@ -396,26 +491,14 @@ class _HomeScreenState extends State<HomeScreen> {
             },
             tooltip: _showFavouritesOnly ? 'Show all notes' : 'Show favourites only',
           ),
-          // Filter by category button
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.filter_list),
-            tooltip: 'Filter by category',
-            onSelected: (value) {
-              setState(() => _filterMode = value);
-            },
-            itemBuilder: (context) => [
-              CheckedPopupMenuItem(
-                value: 'All',
-                checked: _filterMode == 'All',
-                child: const Text('All Categories'),
-              ),
-              if (_availableCategories.isNotEmpty) const PopupMenuDivider(),
-              ..._availableCategories.map((cat) => CheckedPopupMenuItem(
-                value: cat,
-                checked: _filterMode == cat,
-                child: Text(cat),
-              )),
-            ],
+          // Filter by category button (multi-select)
+          IconButton(
+            icon: Icon(
+              Icons.filter_list,
+              color: _selectedCategories.isNotEmpty ? const Color(0xFF6A1B9A) : null,
+            ),
+            tooltip: 'Filter by categories',
+            onPressed: () => _showCategoryFilterDialog(),
           ),
           // Sort button
           PopupMenuButton<String>(

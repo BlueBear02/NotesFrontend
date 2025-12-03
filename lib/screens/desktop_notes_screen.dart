@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'dart:convert';
 import 'package:fleather/fleather.dart';
 import '../models/note.dart';
@@ -6,6 +7,7 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/database_helper.dart';
 import '../services/sync_service.dart';
+import '../services/preferences_service.dart';
 import '../widgets/custom_title_bar.dart';
 
 class DesktopNotesScreen extends StatefulWidget {
@@ -29,6 +31,7 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
   final SyncService _syncService = SyncService.instance;
   final ApiService _apiService = ApiService.instance;
   final AuthService _authService = AuthService.instance;
+  final PreferencesService _prefsService = PreferencesService.instance;
 
   List<Note> _notes = [];
   Note? _selectedNote;
@@ -42,11 +45,16 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
   late FleatherController _fleatherController;
   final FocusNode _editorFocusNode = FocusNode();
   bool _isSaving = false;
-  bool _hasUnsavedChanges = false;
   bool _isFavourite = false;
   bool _isHidden = false;
   bool _showHiddenNotes = false;
   Set<String> _availableCategories = {};
+  String _statusMessage = '';
+  Timer? _autoSaveTimer;
+  bool _isFullscreen = false;
+  String _lastSavedContent = '';
+  String _lastSavedTitle = '';
+  String? _lastSavedCategory;
 
   // Sidebar width
   double _sidebarWidth = 250;
@@ -54,7 +62,7 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
   final double _maxSidebarWidth = 400;
 
   // Filter and sort
-  String _filterMode = 'All'; // 'All' or category name
+  Set<String> _selectedCategories = {}; // Multi-select: empty = show all
   String _sortBy = 'updated'; // 'created', 'updated', 'category', 'title'
   String _sortOrder = 'desc'; // 'asc' or 'desc'
   bool _showFavouritesOnly = false;
@@ -68,26 +76,39 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
     // Initialize showHiddenNotes based on parameter
     _showHiddenNotes = widget.showHiddenNotesInitially;
 
-    // Listen for changes to mark as unsaved
-    _titleController.addListener(_markAsUnsaved);
-    _categoryController.addListener(_markAsUnsaved);
-    _fleatherController.addListener(_markAsUnsaved);
+    // Listen for changes and trigger auto-save
+    _titleController.addListener(_scheduleAutoSave);
+    _categoryController.addListener(_scheduleAutoSave);
+    _fleatherController.addListener(_scheduleAutoSave);
 
-    _loadNotesFromLocal().then((_) {
-      _extractCategories();
-      // If an initial note was passed, select it
-      if (widget.initialNote != null) {
-        final matchingNote = _notes.firstWhere(
-          (note) => note.id == widget.initialNote!.id,
-          orElse: () => widget.initialNote!,
-        );
-        _selectNote(matchingNote);
-      } else if (widget.createNew) {
-        // If createNew flag is set, automatically start creating a new note
-        _createNewNote();
-      }
-      _syncInBackground();
+    _loadSelectedCategories().then((_) {
+      _loadNotesFromLocal().then((_) {
+        _extractCategories();
+        // If an initial note was passed, select it
+        if (widget.initialNote != null) {
+          final matchingNote = _notes.firstWhere(
+            (note) => note.id == widget.initialNote!.id,
+            orElse: () => widget.initialNote!,
+          );
+          _selectNote(matchingNote);
+        } else if (widget.createNew) {
+          // If createNew flag is set, automatically start creating a new note
+          _createNewNote();
+        }
+        _syncInBackground();
+      });
     });
+  }
+
+  Future<void> _loadSelectedCategories() async {
+    final categories = await _prefsService.loadSelectedCategories();
+    setState(() {
+      _selectedCategories = categories;
+    });
+  }
+
+  Future<void> _saveSelectedCategories() async {
+    await _prefsService.saveSelectedCategories(_selectedCategories);
   }
 
   void _extractCategories() {
@@ -95,6 +116,13 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
         .where((note) => note.category != null && note.category!.isNotEmpty)
         .map((note) => note.category!)
         .toSet();
+
+    // Add "Uncategorised" if there are notes without a category
+    final hasUncategorised = _notes.any((note) => note.category == null || note.category!.isEmpty);
+    if (hasUncategorised) {
+      categories.add('Uncategorised');
+    }
+
     setState(() {
       _availableCategories = categories;
       // Initialize all categories as expanded
@@ -120,9 +148,18 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
       filtered = filtered.where((note) => note.isFavourite).toList();
     }
 
-    // Apply category filter
-    if (_filterMode != 'All') {
-      filtered = filtered.where((note) => note.category == _filterMode).toList();
+    // Apply category filter: if categories selected, show only those
+    if (_selectedCategories.isNotEmpty) {
+      filtered = filtered.where((note) {
+        if (_selectedCategories.contains('Uncategorised')) {
+          // Show uncategorised notes or notes in other selected categories
+          return (note.category == null || note.category!.isEmpty) ||
+                 (note.category != null && _selectedCategories.contains(note.category));
+        } else {
+          // Show only notes in selected categories
+          return note.category != null && _selectedCategories.contains(note.category);
+        }
+      }).toList();
     }
 
     // Apply sort
@@ -162,16 +199,31 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
     return grouped;
   }
 
-  void _markAsUnsaved() {
-    if (!_hasUnsavedChanges) {
-      setState(() {
-        _hasUnsavedChanges = true;
-      });
-    }
+  void _scheduleAutoSave() {
+    _autoSaveTimer?.cancel();
+    _autoSaveTimer = Timer(const Duration(seconds: 1), () {
+      if (mounted && !_isSaving && (_selectedNote != null || _isCreatingNew)) {
+        _saveCurrentNote();
+      }
+    });
+  }
+
+  void _showStatus(String message, {Duration duration = const Duration(seconds: 2)}) {
+    setState(() {
+      _statusMessage = message;
+    });
+    Future.delayed(duration, () {
+      if (mounted) {
+        setState(() {
+          _statusMessage = '';
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
+    _autoSaveTimer?.cancel();
     _titleController.dispose();
     _categoryController.dispose();
     _fleatherController.dispose();
@@ -221,7 +273,17 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
     }
   }
 
-  void _selectNote(Note note) {
+  Future<void> _selectNote(Note note) async {
+    // Save current note before switching
+    if (_autoSaveTimer?.isActive ?? false) {
+      _autoSaveTimer?.cancel();
+      await _saveCurrentNote();
+    }
+
+    // Remove listeners temporarily
+    _titleController.removeListener(_scheduleAutoSave);
+    _categoryController.removeListener(_scheduleAutoSave);
+
     setState(() {
       _selectedNote = note;
       _isCreatingNew = false;
@@ -229,24 +291,43 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
       _categoryController.text = note.category ?? '';
       _isFavourite = note.isFavourite;
       _isHidden = note.isHidden;
-      _hasUnsavedChanges = false;
+
+      // Store last saved state
+      _lastSavedTitle = note.title;
+      _lastSavedCategory = note.category;
 
       // Load content as Delta JSON
       try {
         final deltaJson = note.getContentAsDelta();
+        _lastSavedContent = deltaJson;
         final doc = ParchmentDocument.fromJson(jsonDecode(deltaJson));
         _fleatherController.dispose();
         _fleatherController = FleatherController(document: doc);
-        _fleatherController.addListener(_markAsUnsaved);
+        _fleatherController.addListener(_scheduleAutoSave);
       } catch (e) {
         _fleatherController.dispose();
         _fleatherController = FleatherController();
-        _fleatherController.addListener(_markAsUnsaved);
+        _fleatherController.addListener(_scheduleAutoSave);
+        _lastSavedContent = jsonEncode(_fleatherController.document.toDelta().toJson());
       }
     });
+
+    // Re-add listeners
+    _titleController.addListener(_scheduleAutoSave);
+    _categoryController.addListener(_scheduleAutoSave);
   }
 
-  void _createNewNote() {
+  Future<void> _createNewNote() async {
+    // Save current note before creating new
+    if (_autoSaveTimer?.isActive ?? false) {
+      _autoSaveTimer?.cancel();
+      await _saveCurrentNote();
+    }
+
+    // Remove listeners temporarily
+    _titleController.removeListener(_scheduleAutoSave);
+    _categoryController.removeListener(_scheduleAutoSave);
+
     setState(() {
       _selectedNote = null;
       _isCreatingNew = true;
@@ -254,26 +335,44 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
       _categoryController.clear();
       _isFavourite = false;
       _isHidden = false;
-      _hasUnsavedChanges = false;
       _fleatherController.dispose();
       _fleatherController = FleatherController();
-      _fleatherController.addListener(_markAsUnsaved);
+      _fleatherController.addListener(_scheduleAutoSave);
+
+      // Reset last saved state
+      _lastSavedTitle = '';
+      _lastSavedCategory = null;
+      _lastSavedContent = '';
     });
+
+    // Re-add listeners
+    _titleController.addListener(_scheduleAutoSave);
+    _categoryController.addListener(_scheduleAutoSave);
   }
 
   Future<void> _saveCurrentNote() async {
+    _autoSaveTimer?.cancel();
+
     if (_titleController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a title')),
-      );
-      return;
+      return; // Silently skip
+    }
+
+    // Check if anything actually changed
+    final currentContent = jsonEncode(_fleatherController.document.toDelta().toJson());
+    final currentTitle = _titleController.text;
+    final currentCategory = _categoryController.text.trim().isEmpty ? null : _categoryController.text.trim();
+
+    if (currentContent == _lastSavedContent &&
+        currentTitle == _lastSavedTitle &&
+        currentCategory == _lastSavedCategory) {
+      return; // Nothing changed, skip save
     }
 
     setState(() {
       _isSaving = true;
     });
 
-    final deltaJson = jsonEncode(_fleatherController.document.toDelta().toJson());
+    final deltaJson = currentContent;
 
     try {
       if (_selectedNote == null) {
@@ -291,10 +390,11 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
         await _updateNote(deltaJson);
       }
 
-      // Mark as saved
-      setState(() {
-        _hasUnsavedChanges = false;
-      });
+      // Update last saved state
+      _lastSavedContent = currentContent;
+      _lastSavedTitle = currentTitle;
+      _lastSavedCategory = currentCategory;
+
     } finally {
       setState(() {
         _isSaving = false;
@@ -329,10 +429,11 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
       );
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Note saved ✓')),
-        );
-        await _loadNotesFromLocal();
+        _showStatus('Saved');
+        // Add to local list without reloading
+        _notes.add(createdNote);
+        _extractCategories();
+        setState(() {});
       }
     } catch (e) {
       createdNote = await _dbHelper.create(
@@ -348,13 +449,11 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
       );
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Saved offline - will sync when online'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-        await _loadNotesFromLocal();
+        _showStatus('Saved');
+        // Add to local list without reloading
+        _notes.add(createdNote);
+        _extractCategories();
+        setState(() {});
       }
     }
 
@@ -388,44 +487,35 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
           await _dbHelper.updateFromBackend(backendNote, updatedNote.serverId!);
 
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Note updated ✓')),
-            );
+            _showStatus('Updated');
           }
         } catch (e) {
           await _dbHelper.update(updatedNote);
 
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Updated offline - will sync when online'),
-                backgroundColor: Colors.orange,
-              ),
-            );
+            _showStatus('Updated');
           }
         }
       } else {
         await _dbHelper.update(updatedNote);
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Updated offline - will sync when online'),
-              backgroundColor: Colors.orange,
-            ),
-          );
+          _showStatus('Updated');
         }
       }
 
-      await _loadNotesFromLocal();
+      // Update in local list without reloading
+      if (mounted) {
+        final index = _notes.indexWhere((n) => n.id == updatedNote.id);
+        if (index != -1) {
+          _notes[index] = updatedNote;
+          setState(() {});
+        }
+        _selectedNote = updatedNote;
+      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to save: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        _showStatus('Failed to save');
       }
     }
   }
@@ -438,29 +528,20 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
           await _dbHelper.hardDelete(note.id!);
 
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Note deleted ✓')),
-            );
+            _showStatus('Deleted');
           }
         } catch (e) {
           await _dbHelper.delete(note.id!);
 
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Deleted offline - will sync when online'),
-                backgroundColor: Colors.orange,
-              ),
-            );
+            _showStatus('Deleted');
           }
         }
       } else {
         await _dbHelper.hardDelete(note.id!);
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Note deleted ✓')),
-          );
+          _showStatus('Deleted');
         }
       }
 
@@ -473,12 +554,7 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
       await _loadNotesFromLocal();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to delete: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        _showStatus('Failed to delete');
       }
     }
   }
@@ -622,25 +698,16 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
           );
 
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(category == null ? 'Category removed ✓' : 'Moved to $category ✓')),
-            );
+            _showStatus(category == null ? 'Category removed' : 'Moved');
           }
         } catch (e) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Updated offline - will sync when online'),
-                backgroundColor: Colors.orange,
-              ),
-            );
+            _showStatus('Updated');
           }
         }
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(category == null ? 'Category removed ✓' : 'Moved to $category ✓')),
-          );
+          _showStatus(category == null ? 'Category removed' : 'Moved');
         }
       }
 
@@ -663,12 +730,7 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to move: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        _showStatus('Failed to move');
       }
     }
   }
@@ -716,12 +778,7 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
         _isFavourite = !newFavouriteStatus;
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to update favourite: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        _showStatus('Failed to update');
       }
     }
   }
@@ -779,14 +836,73 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
         _isHidden = !newHiddenStatus;
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to update hidden status: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        _showStatus('Failed to update');
       }
     }
+  }
+
+  Future<void> _showCategoryFilterDialog() async {
+    final tempSelected = Set<String>.from(_selectedCategories);
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Filter Categories'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: _availableCategories.isEmpty
+                ? const Text('No categories available')
+                : ListView(
+                    shrinkWrap: true,
+                    children: [
+                      CheckboxListTile(
+                        title: const Text('Show All', style: TextStyle(fontWeight: FontWeight.bold)),
+                        value: tempSelected.isEmpty,
+                        onChanged: (checked) {
+                          setDialogState(() {
+                            if (checked == true) {
+                              tempSelected.clear();
+                            }
+                          });
+                        },
+                      ),
+                      const Divider(),
+                      ..._availableCategories.map((category) => CheckboxListTile(
+                        title: Text(category),
+                        value: tempSelected.contains(category),
+                        onChanged: (checked) {
+                          setDialogState(() {
+                            if (checked == true) {
+                              tempSelected.add(category);
+                            } else {
+                              tempSelected.remove(category);
+                            }
+                          });
+                        },
+                      )),
+                    ],
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _selectedCategories = tempSelected;
+                });
+                _saveSelectedCategories();
+                Navigator.pop(context);
+              },
+              child: const Text('Apply'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _toggleShowHiddenNotes() async {
@@ -807,12 +923,7 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
         });
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Authentication failed'),
-              backgroundColor: Colors.red,
-            ),
-          );
+          _showStatus('Authentication failed');
         }
       }
     } else {
@@ -829,31 +940,12 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
   }
 
   Future<bool> _onWillPop() async {
-    if (!_hasUnsavedChanges) {
-      return true; // Allow exit
+    // Save before exiting
+    if (_autoSaveTimer?.isActive ?? false) {
+      _autoSaveTimer?.cancel();
+      await _saveCurrentNote();
     }
-
-    // Show confirmation dialog
-    final shouldExit = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Unsaved Changes'),
-        content: const Text('You have unsaved changes. Do you want to exit without saving?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Exit Without Saving'),
-          ),
-        ],
-      ),
-    );
-
-    return shouldExit ?? false;
+    return true;
   }
 
   @override
@@ -862,26 +954,41 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
       children: [
         const CustomTitleBar(),
         Expanded(
-          child: PopScope<bool>(
-            canPop: !_hasUnsavedChanges,
-            onPopInvokedWithResult: (didPop, result) async {
-              // If already popped, we can't pop again - just return
-              if (didPop) return;
-
-              final shouldPop = await _onWillPop();
-              if (shouldPop && context.mounted) {
-                Navigator.of(context).pop(_showHiddenNotes);
+          child: Focus(
+            autofocus: true,
+            onKeyEvent: (node, event) {
+              // Exit fullscreen on ESC key
+              if (event.logicalKey.keyLabel == 'Escape' && _isFullscreen) {
+                setState(() {
+                  _isFullscreen = false;
+                });
+                return KeyEventResult.handled;
               }
+              return KeyEventResult.ignored;
             },
-            child: Scaffold(
+            child: PopScope<bool>(
+              canPop: false,
+              onPopInvokedWithResult: (didPop, result) async {
+                if (didPop) return;
+
+                final shouldPop = await _onWillPop();
+                if (shouldPop && context.mounted) {
+                  Navigator.of(context).pop(_showHiddenNotes);
+                }
+              },
+              child: Scaffold(
               backgroundColor: const Color(0xFFF8F9FA),
               appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
-            if (!_hasUnsavedChanges) {
-              Navigator.of(context).pop(_showHiddenNotes);
+            // If fullscreen, exit fullscreen first
+            if (_isFullscreen) {
+              setState(() {
+                _isFullscreen = false;
+              });
             } else {
+              // Otherwise exit the screen
               _onWillPop().then((shouldPop) {
                 if (shouldPop && context.mounted) {
                   Navigator.of(context).pop(_showHiddenNotes);
@@ -892,12 +999,19 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
         ),
         title: Row(
           children: [
-            const Text('Notes'),
-            if (_syncStatus.isNotEmpty) ...[
+            Text(_isFullscreen ? (_selectedNote?.title ?? 'Note') : 'Notes'),
+            if (_syncStatus.isNotEmpty && !_isFullscreen) ...[
               const SizedBox(width: 8),
               Text(
                 _syncStatus,
                 style: const TextStyle(fontSize: 12),
+              ),
+            ],
+            if (_statusMessage.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              Text(
+                _statusMessage,
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
               ),
             ],
           ],
@@ -905,33 +1019,37 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
         backgroundColor: const Color(0xFFF8F9FA),
         foregroundColor: const Color(0xFF6A1B9A),
         actions: [
-          IconButton(
-            icon: Icon(_showHiddenNotes ? Icons.visibility_off : Icons.visibility),
-            onPressed: _toggleShowHiddenNotes,
-            tooltip: _showHiddenNotes ? 'Hide hidden notes' : 'Show hidden notes',
-          ),
-          IconButton(
-            icon: Icon(
-              _showFavouritesOnly ? Icons.star : Icons.star_border,
-              color: _showFavouritesOnly ? const Color(0xFFFFB300) : null,
+          if (!_isFullscreen) ...[
+            IconButton(
+              icon: Icon(_showHiddenNotes ? Icons.visibility_off : Icons.visibility),
+              onPressed: _toggleShowHiddenNotes,
+              tooltip: _showHiddenNotes ? 'Hide hidden notes' : 'Show hidden notes',
             ),
-            onPressed: () {
-              setState(() {
-                _showFavouritesOnly = !_showFavouritesOnly;
-              });
-            },
-            tooltip: _showFavouritesOnly ? 'Show all notes' : 'Show favourites only',
-          ),
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: _createNewNote,
-            tooltip: 'New Note',
-          ),
+            IconButton(
+              icon: Icon(
+                _showFavouritesOnly ? Icons.star : Icons.star_border,
+                color: _showFavouritesOnly ? const Color(0xFFFFB300) : null,
+              ),
+              onPressed: () {
+                setState(() {
+                  _showFavouritesOnly = !_showFavouritesOnly;
+                });
+              },
+              tooltip: _showFavouritesOnly ? 'Show all notes' : 'Show favourites only',
+            ),
+            IconButton(
+              icon: const Icon(Icons.add),
+              onPressed: _createNewNote,
+              tooltip: 'New Note',
+            ),
+          ],
         ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : Row(
+          : _isFullscreen
+              ? _buildFullscreenEditor()
+              : Row(
               children: [
                 // Sidebar - Notes List
                 Container(
@@ -963,27 +1081,30 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
                                     child: Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFFFDFDFD),
+                                        color: _selectedCategories.isNotEmpty ? const Color(0xFF6A1B9A).withValues(alpha: 0.1) : const Color(0xFFFDFDFD),
                                         borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(color: Colors.grey[300]!),
+                                        border: Border.all(color: _selectedCategories.isNotEmpty ? const Color(0xFF6A1B9A) : Colors.grey[300]!),
                                       ),
-                                      child: DropdownButton<String>(
-                                        value: _filterMode,
-                                        isExpanded: true,
-                                        underline: const SizedBox(),
-                                        icon: const Icon(Icons.filter_list, size: 18),
-                                        items: [
-                                          const DropdownMenuItem(value: 'All', child: Text('All Categories')),
-                                          if (_availableCategories.isNotEmpty) const DropdownMenuItem(enabled: false, value: '', child: Divider()),
-                                          ..._availableCategories.map((cat) =>
-                                            DropdownMenuItem(value: cat, child: Text(cat))
-                                          ),
-                                        ],
-                                        onChanged: (value) {
-                                          if (value != null && value.isNotEmpty) {
-                                            setState(() => _filterMode = value);
-                                          }
-                                        },
+                                      child: InkWell(
+                                        borderRadius: BorderRadius.circular(8),
+                                        onTap: _showCategoryFilterDialog,
+                                        child: Row(
+                                          children: [
+                                            const Icon(Icons.filter_list, size: 18),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                _selectedCategories.isEmpty
+                                                    ? 'All Categories'
+                                                    : '${_selectedCategories.length} selected',
+                                                style: TextStyle(
+                                                  color: _selectedCategories.isNotEmpty ? const Color(0xFF6A1B9A) : null,
+                                                  fontWeight: _selectedCategories.isNotEmpty ? FontWeight.w500 : null,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -1272,6 +1393,16 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
                                     },
                                     tooltip: _isHidden ? 'Unhide note' : 'Hide note',
                                   ),
+                                  const Spacer(),
+                                  IconButton(
+                                    icon: const Icon(Icons.fullscreen, size: 28),
+                                    onPressed: () {
+                                      setState(() {
+                                        _isFullscreen = true;
+                                      });
+                                    },
+                                    tooltip: 'Fullscreen (ESC to exit)',
+                                  ),
                                 ],
                               ),
                             ),
@@ -1293,58 +1424,158 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
                             Expanded(
                               child: Padding(
                                 padding: const EdgeInsets.all(16.0),
-                                child: FleatherEditor(
-                                  controller: _fleatherController,
-                                  focusNode: _editorFocusNode,
-                                  padding: EdgeInsets.zero,
+                                child: Builder(
+                                  builder: (context) {
+                                    try {
+                                      return FleatherEditor(
+                                        controller: _fleatherController,
+                                        focusNode: _editorFocusNode,
+                                        padding: EdgeInsets.zero,
+                                      );
+                                    } catch (e) {
+                                      // Catch Fleather rendering errors and continue
+                                      return FleatherEditor(
+                                        controller: _fleatherController,
+                                        focusNode: _editorFocusNode,
+                                        padding: EdgeInsets.zero,
+                                      );
+                                    }
+                                  },
                                 ),
                               ),
                             ),
-                            // Save button bar
-                            Container(
-                              padding: const EdgeInsets.all(16.0),
-                              decoration: BoxDecoration(
-                                border: Border(
-                                  top: BorderSide(color: Colors.grey[300]!),
+                            // Status bar (no save button, auto-saves)
+                            if (_selectedNote != null)
+                              Container(
+                                padding: const EdgeInsets.all(12.0),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8F9FA),
+                                  border: Border(
+                                    top: BorderSide(color: Colors.grey[300]!),
+                                  ),
                                 ),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.end,
-                                children: [
-                                  if (_selectedNote != null)
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
                                     TextButton.icon(
                                       onPressed: () => _deleteNote(_selectedNote!),
-                                      icon: const Icon(Icons.delete, color: Colors.red),
+                                      icon: const Icon(Icons.delete, color: Colors.red, size: 18),
                                       label: const Text('Delete', style: TextStyle(color: Colors.red)),
                                     ),
-                                  const SizedBox(width: 8),
-                                  ElevatedButton.icon(
-                                    onPressed: _isSaving ? null : _saveCurrentNote,
-                                    icon: _isSaving
-                                        ? const SizedBox(
-                                            width: 16,
-                                            height: 16,
+                                    if (_isSaving)
+                                      const Row(
+                                        children: [
+                                          SizedBox(
+                                            width: 14,
+                                            height: 14,
                                             child: CircularProgressIndicator(strokeWidth: 2),
-                                          )
-                                        : const Icon(Icons.check),
-                                    label: Text(_selectedNote == null ? 'Create' : 'Save'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFF6A1B9A),
-                                      foregroundColor: Colors.white,
-                                    ),
-                                  ),
-                                ],
+                                          ),
+                                          SizedBox(width: 6),
+                                          Text(
+                                            'Saving...',
+                                            style: TextStyle(fontSize: 12, color: Colors.grey),
+                                          ),
+                                        ],
+                                      ),
+                                  ],
+                                ),
                               ),
-                            ),
                           ],
                         ),
                   ),
                 ),
               ],
             ),
+              ),
             ),
           ),
         ),
+      ],
+    );
+  }
+
+  Widget _buildFullscreenEditor() {
+    return Column(
+      children: [
+        // Formatting toolbar
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border(
+              bottom: BorderSide(color: Colors.grey[300]!),
+            ),
+          ),
+          child: SizedBox(
+            height: 56,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                IntrinsicWidth(
+                  child: FleatherToolbar.basic(controller: _fleatherController),
+                ),
+              ],
+            ),
+          ),
+        ),
+        // Fullscreen editor
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Builder(
+              builder: (context) {
+                try {
+                  return FleatherEditor(
+                    controller: _fleatherController,
+                    focusNode: _editorFocusNode,
+                    padding: EdgeInsets.zero,
+                  );
+                } catch (e) {
+                  return FleatherEditor(
+                    controller: _fleatherController,
+                    focusNode: _editorFocusNode,
+                    padding: EdgeInsets.zero,
+                  );
+                }
+              },
+            ),
+          ),
+        ),
+        // Status bar at bottom
+        if (_selectedNote != null)
+          Container(
+            padding: const EdgeInsets.all(12.0),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8F9FA),
+              border: Border(
+                top: BorderSide(color: Colors.grey[300]!),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                TextButton.icon(
+                  onPressed: () => _deleteNote(_selectedNote!),
+                  icon: const Icon(Icons.delete, color: Colors.red, size: 18),
+                  label: const Text('Delete', style: TextStyle(color: Colors.red)),
+                ),
+                if (_isSaving)
+                  const Row(
+                    children: [
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      SizedBox(width: 6),
+                      Text(
+                        'Saving...',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
       ],
     );
   }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:async';
 import 'dart:convert';
 import 'package:fleather/fleather.dart';
 import '../models/note.dart';
@@ -24,27 +25,30 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
   final FocusNode _editorFocusNode = FocusNode();
   bool _isSaving = false;
-  bool _hasUnsavedChanges = false;
   bool _isFavourite = false;
   bool _isHidden = false;
   Set<String> _availableCategories = {};
+  String _statusMessage = '';
+  Timer? _autoSaveTimer;
+  Note? _currentNote;
 
-  bool get _isEditMode => widget.note != null;
+  bool get _isEditMode => _currentNote != null;
 
   @override
   void initState() {
     super.initState();
+    _currentNote = widget.note;
     _loadCategories();
 
     // If editing, populate fields with existing note data
-    if (_isEditMode) {
-      _titleController.text = widget.note!.title;
-      _categoryController.text = widget.note!.category ?? '';
-      _isFavourite = widget.note!.isFavourite;
-      _isHidden = widget.note!.isHidden;
+    if (_currentNote != null) {
+      _titleController.text = _currentNote!.title;
+      _categoryController.text = _currentNote!.category ?? '';
+      _isFavourite = _currentNote!.isFavourite;
+      _isHidden = _currentNote!.isHidden;
       // Load content as Delta JSON
       try {
-        final deltaJson = widget.note!.getContentAsDelta();
+        final deltaJson = _currentNote!.getContentAsDelta();
         final doc = ParchmentDocument.fromJson(jsonDecode(deltaJson));
         _fleatherController = FleatherController(document: doc);
       } catch (e) {
@@ -56,10 +60,10 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
       _fleatherController = FleatherController();
     }
 
-    // Listen for changes
-    _titleController.addListener(_markAsUnsaved);
-    _categoryController.addListener(_markAsUnsaved);
-    _fleatherController.addListener(_markAsUnsaved);
+    // Listen for changes and trigger auto-save
+    _titleController.addListener(_scheduleAutoSave);
+    _categoryController.addListener(_scheduleAutoSave);
+    _fleatherController.addListener(_scheduleAutoSave);
   }
 
   Future<void> _loadCategories() async {
@@ -81,7 +85,7 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
 
     // Immediately save to database
     try {
-      final updatedNote = widget.note!.copyWith(
+      final updatedNote = _currentNote!.copyWith(
         isFavourite: newFavouriteStatus,
         updatedAt: DateTime.now(),
       );
@@ -109,12 +113,7 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
         _isFavourite = !newFavouriteStatus;
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to update favourite: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        _showStatus('Failed to update');
       }
     }
   }
@@ -128,7 +127,7 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
     // Immediately save to database if editing
     if (_isEditMode) {
       try {
-        final updatedNote = widget.note!.copyWith(
+        final updatedNote = _currentNote!.copyWith(
           isHidden: newHiddenStatus,
           updatedAt: DateTime.now(),
         );
@@ -156,27 +155,37 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
           _isHidden = !newHiddenStatus;
         });
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to update hidden status: ${e.toString()}'),
-              backgroundColor: Colors.red,
-            ),
-          );
+          _showStatus('Failed to update');
         }
       }
     }
   }
 
-  void _markAsUnsaved() {
-    if (!_hasUnsavedChanges) {
-      setState(() {
-        _hasUnsavedChanges = true;
-      });
-    }
+  void _scheduleAutoSave() {
+    _autoSaveTimer?.cancel();
+    _autoSaveTimer = Timer(const Duration(seconds: 1), () {
+      if (mounted && !_isSaving) {
+        _saveNote();
+      }
+    });
+  }
+
+  void _showStatus(String message, {Duration duration = const Duration(seconds: 2)}) {
+    setState(() {
+      _statusMessage = message;
+    });
+    Future.delayed(duration, () {
+      if (mounted) {
+        setState(() {
+          _statusMessage = '';
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
+    _autoSaveTimer?.cancel();
     _titleController.dispose();
     _categoryController.dispose();
     _fleatherController.dispose();
@@ -185,6 +194,8 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
   }
 
   Future<void> _saveNote() async {
+    _autoSaveTimer?.cancel();
+
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -216,7 +227,7 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
       );
 
       // Backend succeeded! Save to local as already synced
-      await _dbHelper.createSynced(
+      final createdNote = await _dbHelper.createSynced(
         Note(
           title: _titleController.text,
           content: deltaJson,
@@ -229,18 +240,14 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
         backendNote.id!,
       );
 
+      // Switch from create mode to edit mode
       if (mounted) {
-        setState(() {
-          _hasUnsavedChanges = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Note saved ✓')),
-        );
-        Navigator.pop(context, true);
+        _currentNote = createdNote;
+        _showStatus('Saved');
       }
     } catch (e) {
       // Backend failed (offline or error) - save locally only
-      await _dbHelper.create(
+      final createdNote = await _dbHelper.create(
         Note(
           title: _titleController.text,
           content: deltaJson,
@@ -252,14 +259,10 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
         ),
       );
 
+      // Switch from create mode to edit mode
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Saved offline - will sync when online'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-        Navigator.pop(context, true);
+        _currentNote = createdNote;
+        _showStatus('Saved');
       }
     } finally {
       if (mounted) {
@@ -275,7 +278,7 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete Note'),
-        content: Text('Are you sure you want to delete "${widget.note!.title}"?'),
+        content: Text('Are you sure you want to delete "${_currentNote!.title}"?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -301,7 +304,7 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
     });
 
     try {
-      final note = widget.note!;
+      final note = _currentNote!;
 
       // Try to delete from backend first (if note has server_id)
       if (note.serverId != null) {
@@ -311,9 +314,7 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
           await _dbHelper.hardDelete(note.id!);
 
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Note deleted ✓')),
-            );
+            _showStatus('Deleted');
             Navigator.pop(context, true);
           }
         } catch (e) {
@@ -321,12 +322,7 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
           await _dbHelper.delete(note.id!);
 
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Deleted offline - will sync when online'),
-                backgroundColor: Colors.orange,
-              ),
-            );
+            _showStatus('Deleted');
             Navigator.pop(context, true);
           }
         }
@@ -335,20 +331,13 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
         await _dbHelper.hardDelete(note.id!);
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Note deleted ✓')),
-          );
+          _showStatus('Deleted');
           Navigator.pop(context, true);
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to delete: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        _showStatus('Failed to delete');
       }
     } finally {
       if (mounted) {
@@ -365,7 +354,7 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
     final category = _categoryController.text.trim().isEmpty ? null : _categoryController.text.trim();
 
     try {
-      final updatedNote = widget.note!.copyWith(
+      final updatedNote = _currentNote!.copyWith(
         title: _titleController.text,
         content: deltaJson,
         category: category,
@@ -390,23 +379,14 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
           await _dbHelper.updateFromBackend(backendNote, updatedNote.serverId!);
 
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Note updated ✓')),
-            );
-            Navigator.pop(context, true);
+            _showStatus('Updated');
           }
         } catch (e) {
           // Backend failed - update locally only (will sync later)
           await _dbHelper.update(updatedNote);
 
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Updated offline - will sync when online'),
-                backgroundColor: Colors.orange,
-              ),
-            );
-            Navigator.pop(context, true);
+            _showStatus('Updated');
           }
         }
       } else {
@@ -414,13 +394,7 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
         await _dbHelper.update(updatedNote);
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Updated offline - will sync when online'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-          Navigator.pop(context, true);
+          _showStatus('Updated');
         }
       }
     } finally {
@@ -433,31 +407,12 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
   }
 
   Future<bool> _onWillPop() async {
-    if (!_hasUnsavedChanges) {
-      return true; // Allow exit
+    // Save before exiting
+    if (_autoSaveTimer?.isActive ?? false) {
+      _autoSaveTimer?.cancel();
+      await _saveNote();
     }
-
-    // Show confirmation dialog
-    final shouldExit = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Unsaved Changes'),
-        content: const Text('You have unsaved changes. Do you want to exit without saving?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Exit Without Saving'),
-          ),
-        ],
-      ),
-    );
-
-    return shouldExit ?? false;
+    return true;
   }
 
   @override
@@ -472,19 +427,30 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
     );
 
     return PopScope(
-      canPop: !_hasUnsavedChanges,
+      canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
 
         final shouldPop = await _onWillPop();
         if (shouldPop && context.mounted) {
-          Navigator.of(context).pop();
+          Navigator.of(context).pop(true); // Pass true to indicate note was modified
         }
       },
       child: Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
       appBar: AppBar(
-        title: Text(_isEditMode ? 'Edit Note' : 'New Note'),
+        title: Row(
+          children: [
+            Text(_isEditMode ? 'Edit Note' : 'New Note'),
+            if (_statusMessage.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              Text(
+                _statusMessage,
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ],
+          ],
+        ),
         backgroundColor: Colors.transparent,
         elevation: 0,
         foregroundColor: Theme.of(context).textTheme.bodyLarge?.color,
@@ -500,17 +466,6 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
               onPressed: _showDeleteDialog,
               tooltip: 'Delete note',
             ),
-          IconButton(
-            icon: _isSaving
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.check),
-            onPressed: _isSaving ? null : _saveNote,
-            tooltip: 'Save',
-          ),
         ],
       ),
       body: Form(
