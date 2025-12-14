@@ -23,6 +23,11 @@ class SyncService {
   SyncService._init();
 
   Future<SyncResult> syncWithBackend() async {
+    // Skip sync if API is not configured (local-only mode)
+    if (!ApiService.isConfigured) {
+      return SyncResult(success: true, notesPushed: 0, notesPulled: 0);
+    }
+
     int pushedCount = 0;
     int pulledCount = 0;
 

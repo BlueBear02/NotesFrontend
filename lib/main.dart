@@ -31,7 +31,13 @@ Future<void> main() async {
     });
   }
 
-  await dotenv.load(fileName: ".env");
+  // Try to load .env file, but continue if it doesn't exist (local-only mode)
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    // .env file not found - app will run in local-only mode without sync
+    debugPrint('No .env file found - running in local-only mode');
+  }
   runApp(const MainApp());
 }
 

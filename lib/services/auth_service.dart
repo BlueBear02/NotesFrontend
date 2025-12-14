@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'package:local_auth/local_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +11,11 @@ class AuthService {
 
   /// Check if biometric authentication is available on the device
   Future<bool> canAuthenticate() async {
+    // Linux doesn't support local_auth, so we skip auth there
+    if (Platform.isLinux) {
+      return true;
+    }
+
     try {
       return await _auth.canCheckBiometrics || await _auth.isDeviceSupported();
     } catch (e) {
@@ -28,9 +34,16 @@ class AuthService {
 
   /// Authenticate user using biometrics or device credentials
   /// Returns true if authenticated successfully, false otherwise
+  /// On Linux, always returns true (no auth available)
   Future<bool> authenticate({
     String reason = 'Please authenticate to view hidden notes',
   }) async {
+    // Linux doesn't support local_auth, allow access without auth
+    if (Platform.isLinux) {
+      debugPrint('Linux detected - skipping authentication');
+      return true;
+    }
+
     try {
       final canAuth = await canAuthenticate();
       if (!canAuth) {

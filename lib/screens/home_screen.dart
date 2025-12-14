@@ -60,6 +60,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _syncInBackground() async {
+    // Skip sync UI entirely if API is not configured (local-only mode)
+    if (!ApiService.isConfigured) {
+      return;
+    }
+
     setState(() {
       _syncStatus = 'Syncing...';
     });

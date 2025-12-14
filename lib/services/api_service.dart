@@ -7,6 +7,9 @@ class ApiService {
   static String get baseUrl => dotenv.env['API_URL'] ?? '';
   static String get apiKey => dotenv.env['API_KEY'] ?? '';
 
+  /// Returns true if API credentials are configured (has both URL and key)
+  static bool get isConfigured => baseUrl.isNotEmpty && apiKey.isNotEmpty;
+
   static final ApiService instance = ApiService._init();
 
   ApiService._init();
