@@ -67,7 +67,7 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
   String _sortBy = 'updated'; // 'created', 'updated', 'category', 'title'
   String _sortOrder = 'desc'; // 'asc' or 'desc'
   bool _showFavouritesOnly = false;
-  Map<String, bool> _expandedCategories = {};
+  final _expandedCategories = <String, bool>{};
 
   @override
   void initState() {
@@ -150,9 +150,6 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
       categories.add('Uncategorised');
     }
 
-    // Debug output
-    print('showHidden: $_showHiddenNotes, available categories: $categories, selected: $_selectedCategories');
-
     // Check if we need to remove invalid categories BEFORE modifying
     final invalidCategories = _selectedCategories.where((cat) => !categories.contains(cat)).toSet();
 
@@ -168,7 +165,6 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
 
     // Save updated selected categories if any were removed
     if (invalidCategories.isNotEmpty) {
-      print('Removing invalid categories: $invalidCategories');
       _saveSelectedCategories();
     }
   }

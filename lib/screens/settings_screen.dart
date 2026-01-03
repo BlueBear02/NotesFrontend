@@ -124,35 +124,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                         ),
                         const SizedBox(height: 16),
+                        // ignore: deprecated_member_use
                         RadioListTile<String>(
                           title: const Text('Notes Grid'),
                           subtitle: const Text('Show all your notes in a grid'),
                           value: 'grid',
-                          groupValue: _defaultHomeScreen,
+                          selected: _defaultHomeScreen == 'grid',
+                          toggleable: true,
+                          // ignore: deprecated_member_use
                           onChanged: (value) {
                             if (value != null) _saveDefaultHomeScreen(value);
                           },
-                          activeColor: Theme.of(context).colorScheme.primary,
                         ),
+                        // ignore: deprecated_member_use
                         RadioListTile<String>(
                           title: const Text('Empty Note'),
                           subtitle: const Text('Start with a blank note ready to write'),
                           value: 'empty_note',
-                          groupValue: _defaultHomeScreen,
+                          selected: _defaultHomeScreen == 'empty_note',
+                          toggleable: true,
+                          // ignore: deprecated_member_use
                           onChanged: (value) {
                             if (value != null) _saveDefaultHomeScreen(value);
                           },
-                          activeColor: Theme.of(context).colorScheme.primary,
                         ),
+                        // ignore: deprecated_member_use
                         RadioListTile<String>(
                           title: const Text('Last Opened Note'),
                           subtitle: const Text('Continue where you left off'),
                           value: 'last_opened',
-                          groupValue: _defaultHomeScreen,
+                          selected: _defaultHomeScreen == 'last_opened',
+                          toggleable: true,
+                          // ignore: deprecated_member_use
                           onChanged: (value) {
                             if (value != null) _saveDefaultHomeScreen(value);
                           },
-                          activeColor: Theme.of(context).colorScheme.primary,
                         ),
                       ],
                     ),
@@ -200,7 +206,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         Switch(
                           value: _isDarkMode,
                           onChanged: _toggleDarkMode,
-                          activeColor: Theme.of(context).colorScheme.primary,
                         ),
                       ],
                     ),
@@ -259,7 +264,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 width: 80,
                                 padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(
-                                  color: Color(colorValue).withOpacity(0.1),
+                                  color: Color(colorValue).withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
                                     color: isSelected ? Color(colorValue) : Colors.grey[300]!,

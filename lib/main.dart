@@ -8,7 +8,6 @@ import 'screens/desktop_notes_screen.dart';
 import 'screens/note_form_screen.dart';
 import 'services/preferences_service.dart';
 import 'services/database_helper.dart';
-import 'models/note.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
