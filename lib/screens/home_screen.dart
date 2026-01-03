@@ -498,7 +498,7 @@ class _HomeScreenState extends State<HomeScreen> {
         const CustomTitleBar(),
         Expanded(
           child: Scaffold(
-            backgroundColor: const Color(0xFFF8F9FA),
+            backgroundColor: Theme.of(context).colorScheme.surface,
             appBar: AppBar(
         title: Row(
           children: [
@@ -512,8 +512,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ],
         ),
-        backgroundColor: const Color(0xFFF8F9FA),
-        foregroundColor: const Color(0xFF6A1B9A),
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        foregroundColor: Theme.of(context).colorScheme.onSurface,
         actions: [
           // Show/Hide hidden notes button
           IconButton(
@@ -538,7 +538,7 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(
             icon: Icon(
               Icons.filter_list,
-              color: _selectedCategories.isNotEmpty ? const Color(0xFF6A1B9A) : null,
+              color: _selectedCategories.isNotEmpty ? Theme.of(context).colorScheme.primary : null,
             ),
             tooltip: 'Filter by categories',
             onPressed: () => _showCategoryFilterDialog(),
@@ -661,7 +661,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
                           return Card(
                             elevation: 2,
-                            color: const Color(0xFFFDFDFD),
+                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
@@ -743,7 +743,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
       floatingActionButton: FloatingActionButton(
         onPressed: _navigateToCreateNote,
-        backgroundColor: const Color(0xFF6A1B9A),
+        backgroundColor: Theme.of(context).brightness == Brightness.dark
+            ? Color.lerp(Theme.of(context).colorScheme.primary, Colors.black, 0.4)
+            : Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
         child: const Icon(Icons.add),
       ),

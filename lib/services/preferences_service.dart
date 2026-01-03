@@ -4,6 +4,8 @@ class PreferencesService {
   static const String _selectedCategoriesKey = 'selected_categories';
   static const String _defaultHomeScreenKey = 'default_home_screen';
   static const String _lastOpenedNoteIdKey = 'last_opened_note_id';
+  static const String _themeColorKey = 'theme_color';
+  static const String _darkModeKey = 'dark_mode';
 
   static PreferencesService? _instance;
   static PreferencesService get instance {
@@ -53,5 +55,27 @@ class PreferencesService {
   Future<int?> getLastOpenedNoteId() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getInt(_lastOpenedNoteIdKey);
+  }
+
+  // Theme color preference
+  Future<void> setThemeColor(int colorValue) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_themeColorKey, colorValue);
+  }
+
+  Future<int> getThemeColor() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_themeColorKey) ?? 0xFF6A1B9A; // Default purple
+  }
+
+  // Dark mode preference
+  Future<void> setDarkMode(bool isDark) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_darkModeKey, isDark);
+  }
+
+  Future<bool> getDarkMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_darkModeKey) ?? false; // Default light mode
   }
 }

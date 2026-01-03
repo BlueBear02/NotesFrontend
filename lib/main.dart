@@ -46,14 +46,77 @@ Future<void> main() async {
   runApp(const MainApp());
 }
 
-class MainApp extends StatelessWidget {
+class MainApp extends StatefulWidget {
   const MainApp({super.key});
+
+  @override
+  State<MainApp> createState() => _MainAppState();
+}
+
+// Global theme notifiers
+final themeColorNotifier = ValueNotifier<int>(0xFF6A1B9A);
+final darkModeNotifier = ValueNotifier<bool>(false);
+
+class _MainAppState extends State<MainApp> {
+  final PreferencesService _prefsService = PreferencesService.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadThemeSettings();
+    // Listen for theme changes
+    themeColorNotifier.addListener(_onThemeChanged);
+    darkModeNotifier.addListener(_onThemeChanged);
+  }
+
+  @override
+  void dispose() {
+    themeColorNotifier.removeListener(_onThemeChanged);
+    darkModeNotifier.removeListener(_onThemeChanged);
+    super.dispose();
+  }
+
+  void _onThemeChanged() {
+    setState(() {});
+  }
+
+  Future<void> _loadThemeSettings() async {
+    final color = await _prefsService.getThemeColor();
+    final darkMode = await _prefsService.getDarkMode();
+    themeColorNotifier.value = color;
+    darkModeNotifier.value = darkMode;
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Notepad+++',
       debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        primaryColor: Color(themeColorNotifier.value),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Color(themeColorNotifier.value),
+          brightness: Brightness.light,
+        ).copyWith(
+          surface: const Color(0xFFFAFAFA), // Very light gray instead of tinted
+          surfaceContainerLowest: const Color(0xFFFFFFFF),
+          surfaceContainerLow: const Color(0xFFF5F5F5),
+          surfaceContainer: const Color(0xFFF0F0F0),
+          surfaceContainerHigh: const Color(0xFFECECEC),
+          surfaceContainerHighest: const Color(0xFFE8E8E8),
+        ),
+        scaffoldBackgroundColor: const Color(0xFFFAFAFA),
+        useMaterial3: true,
+      ),
+      darkTheme: ThemeData(
+        primaryColor: Color(themeColorNotifier.value),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Color(themeColorNotifier.value),
+          brightness: Brightness.dark,
+        ),
+        useMaterial3: true,
+      ),
+      themeMode: darkModeNotifier.value ? ThemeMode.dark : ThemeMode.light,
       home: const InitialScreen(),
     );
   }
@@ -79,65 +142,77 @@ class _InitialScreenState extends State<InitialScreen> {
   }
 
   Future<void> _determineHomeScreen() async {
-    final defaultHomeScreen = await _prefsService.getDefaultHomeScreen();
+    try {
+      final defaultHomeScreen = await _prefsService.getDefaultHomeScreen();
 
-    Widget home;
+      Widget home;
 
-    switch (defaultHomeScreen) {
-      case 'empty_note':
-        // Open directly to a new empty note
-        if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
-          home = const DesktopNotesScreen(createNew: true);
-        } else {
-          // Mobile uses NoteFormScreen for new notes
-          home = const NoteFormScreen();
-        }
-        break;
+      switch (defaultHomeScreen) {
+        case 'empty_note':
+          // Open directly to a new empty note
+          if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+            home = const DesktopNotesScreen(createNew: true);
+          } else {
+            // Mobile uses NoteFormScreen for new notes
+            home = const NoteFormScreen();
+          }
+          break;
 
-      case 'last_opened':
-        // Try to open the last opened note
-        final lastNoteId = await _prefsService.getLastOpenedNoteId();
-        if (lastNoteId != null) {
-          try {
-            final notes = await _dbHelper.readAll();
-            final note = notes.firstWhere((n) => n.id == lastNoteId);
-            if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
-              home = DesktopNotesScreen(initialNote: note);
-            } else {
-              // Mobile uses NoteFormScreen for editing
-              home = NoteFormScreen(note: note);
+        case 'last_opened':
+          // Try to open the last opened note
+          final lastNoteId = await _prefsService.getLastOpenedNoteId();
+          if (lastNoteId != null) {
+            try {
+              final notes = await _dbHelper.readAll();
+              final note = notes.firstWhere((n) => n.id == lastNoteId);
+              if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+                home = DesktopNotesScreen(initialNote: note);
+              } else {
+                // Mobile uses NoteFormScreen for editing
+                home = NoteFormScreen(note: note);
+              }
+            } catch (e) {
+              // Note not found, fall back to grid
+              home = const HomeScreen();
             }
-          } catch (e) {
-            // Note not found, fall back to grid
+          } else {
+            // No last note, fall back to grid
             home = const HomeScreen();
           }
-        } else {
-          // No last note, fall back to grid
+          break;
+
+        case 'grid':
+        default:
+          // Default grid view
           home = const HomeScreen();
-        }
-        break;
+          break;
+      }
 
-      case 'grid':
-      default:
-        // Default grid view
-        home = const HomeScreen();
-        break;
+      if (mounted) {
+        setState(() {
+          _homeWidget = home;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      // On any error, default to home screen
+      if (mounted) {
+        setState(() {
+          _homeWidget = const HomeScreen();
+          _isLoading = false;
+        });
+      }
     }
-
-    setState(() {
-      _homeWidget = home;
-      _isLoading = false;
-    });
   }
 
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-        backgroundColor: Color(0xFFF8F9FA),
+      return Scaffold(
+        backgroundColor: Theme.of(context).colorScheme.surface,
         body: Center(
           child: CircularProgressIndicator(
-            color: Color(0xFF6A1B9A),
+            color: Theme.of(context).colorScheme.primary,
           ),
         ),
       );

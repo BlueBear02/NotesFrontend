@@ -631,11 +631,11 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
       ),
       items: [
         PopupMenuItem(
-          child: const Row(
+          child: Row(
             children: [
-              Icon(Icons.folder, color: Color(0xFF6A1B9A), size: 20),
-              SizedBox(width: 8),
-              Text('Move to category'),
+              Icon(Icons.folder, color: Theme.of(context).colorScheme.primary, size: 20),
+              const SizedBox(width: 8),
+              const Text('Move to category'),
             ],
           ),
           onTap: () {
@@ -672,10 +672,10 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
             children: [
               // Existing categories
               ..._availableCategories.map((category) => ListTile(
-                leading: const Icon(Icons.folder, color: Color(0xFF6A1B9A)),
+                leading: Icon(Icons.folder, color: Theme.of(context).colorScheme.primary),
                 title: Text(category),
                 trailing: note.category == category
-                    ? const Icon(Icons.check, color: Color(0xFF6A1B9A))
+                    ? Icon(Icons.check, color: Theme.of(context).colorScheme.primary)
                     : null,
                 onTap: () {
                   Navigator.pop(context);
@@ -1035,7 +1035,7 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
                 }
               },
               child: Scaffold(
-              backgroundColor: const Color(0xFFF8F9FA),
+              backgroundColor: Theme.of(context).colorScheme.surface,
               appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -1082,8 +1082,8 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
             ],
           ],
         ),
-        backgroundColor: const Color(0xFFF8F9FA),
-        foregroundColor: const Color(0xFF6A1B9A),
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        foregroundColor: Theme.of(context).colorScheme.onSurface,
         actions: [
           if (!_isFullscreen) ...[
             IconButton(
@@ -1121,14 +1121,14 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
                 Container(
                   width: _sidebarWidth,
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: Theme.of(context).colorScheme.surfaceContainerLow,
                     border: Border(
-                      right: BorderSide(color: Colors.grey[300]!),
+                      right: BorderSide(color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.2)),
                     ),
                   ),
                   child: _notes.isEmpty
-                      ? const Center(
-                          child: Text('No notes yet'),
+                      ? Center(
+                          child: Text('No notes yet', style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
                         )
                       : Column(
                           children: [
@@ -1136,9 +1136,9 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
                             Container(
                               padding: const EdgeInsets.all(12.0),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFF8F9FA),
+                                color: Theme.of(context).colorScheme.surfaceContainerLow,
                                 border: Border(
-                                  bottom: BorderSide(color: Colors.grey[200]!),
+                                  bottom: BorderSide(color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.1)),
                                 ),
                               ),
                               child: Row(
@@ -1147,16 +1147,16 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
                                     child: Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                       decoration: BoxDecoration(
-                                        color: _selectedCategories.isNotEmpty ? const Color(0xFF6A1B9A).withValues(alpha: 0.1) : const Color(0xFFFDFDFD),
+                                        color: _selectedCategories.isNotEmpty ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.1) : Theme.of(context).colorScheme.surfaceContainerHighest,
                                         borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(color: _selectedCategories.isNotEmpty ? const Color(0xFF6A1B9A) : Colors.grey[300]!),
+                                        border: Border.all(color: _selectedCategories.isNotEmpty ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.outline.withValues(alpha: 0.3)),
                                       ),
                                       child: InkWell(
                                         borderRadius: BorderRadius.circular(8),
                                         onTap: _showCategoryFilterDialog,
                                         child: Row(
                                           children: [
-                                            const Icon(Icons.filter_list, size: 18),
+                                            Icon(Icons.filter_list, size: 18, color: Theme.of(context).colorScheme.onSurface),
                                             const SizedBox(width: 8),
                                             Expanded(
                                               child: Text(
@@ -1164,7 +1164,7 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
                                                     ? 'All Categories'
                                                     : '${_selectedCategories.length} selected',
                                                 style: TextStyle(
-                                                  color: _selectedCategories.isNotEmpty ? const Color(0xFF6A1B9A) : null,
+                                                  color: _selectedCategories.isNotEmpty ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurface,
                                                   fontWeight: _selectedCategories.isNotEmpty ? FontWeight.w500 : null,
                                                 ),
                                               ),
@@ -1177,12 +1177,12 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
                                   const SizedBox(width: 8),
                                   Container(
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFFFDFDFD),
+                                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
                                       borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(color: Colors.grey[300]!),
+                                      border: Border.all(color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.3)),
                                     ),
                                     child: PopupMenuButton<String>(
-                                      icon: const Icon(Icons.sort, size: 20),
+                                      icon: Icon(Icons.sort, size: 20, color: Theme.of(context).colorScheme.onSurface),
                                       tooltip: 'Sort',
                                       onSelected: (value) {
                                         setState(() {
@@ -1261,12 +1261,12 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
                                               leading: Container(
                                                 padding: const EdgeInsets.all(8),
                                                 decoration: BoxDecoration(
-                                                  color: const Color(0xFF6A1B9A).withValues(alpha: 0.1),
+                                                  color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                                                   borderRadius: BorderRadius.circular(8),
                                                 ),
                                                 child: Icon(
                                                   category == 'Uncategorized' ? Icons.folder_open : Icons.folder,
-                                                  color: const Color(0xFF6A1B9A),
+                                                  color: Theme.of(context).colorScheme.primary,
                                                   size: 20,
                                                 ),
                                               ),
@@ -1298,12 +1298,12 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
                                                         margin: const EdgeInsets.only(left: 8, bottom: 2),
                                                         decoration: BoxDecoration(
                                                           color: isSelected
-                                                              ? const Color(0xFF6A1B9A).withValues(alpha: 0.1)
+                                                              ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.1)
                                                               : Colors.transparent,
                                                           borderRadius: BorderRadius.circular(8),
                                                           border: Border.all(
                                                             color: isSelected
-                                                                ? const Color(0xFF6A1B9A).withValues(alpha: 0.3)
+                                                                ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.3)
                                                                 : Colors.transparent,
                                                             width: 1,
                                                           ),
@@ -1314,7 +1314,7 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
                                                           leading: note.isFavourite
                                                               ? const Icon(Icons.star, color: Color(0xFFFFB300), size: 18)
                                                               : note.isHidden
-                                                                  ? const Icon(Icons.visibility_off, color: Color(0xFF6A1B9A), size: 18)
+                                                                  ? Icon(Icons.visibility_off, color: Theme.of(context).colorScheme.primary, size: 18)
                                                                   : null,
                                                           title: Text(
                                                             _getDisplayTitle(note),
@@ -1366,12 +1366,12 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
                 // Editor Area
                 Expanded(
                   child: Container(
-                    color: const Color(0xFFFDFDFD),
+                    color: Theme.of(context).colorScheme.surface,
                     child: _selectedNote == null && !_isCreatingNew
-                        ? const Center(
+                        ? Center(
                             child: Text(
                               'Select a note or create a new one',
-                              style: TextStyle(color: Colors.grey),
+                              style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
                             ),
                           )
                         : Column(
@@ -1412,7 +1412,7 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
                                         border: OutlineInputBorder(
                                           borderRadius: BorderRadius.circular(8),
                                         ),
-                                        prefixIcon: const Icon(Icons.folder_outlined, color: Color(0xFF6A1B9A)),
+                                        prefixIcon: Icon(Icons.folder_outlined, color: Theme.of(context).colorScheme.primary),
                                         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                                         suffixIcon: _availableCategories.isNotEmpty
                                             ? PopupMenuButton<String>(
@@ -1449,7 +1449,7 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
                                   IconButton(
                                     icon: Icon(
                                       _isHidden ? Icons.visibility_off : Icons.visibility,
-                                      color: _isHidden ? const Color(0xFF6A1B9A) : Colors.grey,
+                                      color: _isHidden ? Theme.of(context).colorScheme.primary : Colors.grey,
                                       size: 28,
                                     ),
                                     onPressed: _selectedNote != null ? () => _toggleHidden() : () {
@@ -1536,9 +1536,9 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
         // Formatting toolbar
         Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             border: Border(
-              bottom: BorderSide(color: Colors.grey[300]!),
+              bottom: BorderSide(color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.2)),
             ),
           ),
           child: SizedBox(

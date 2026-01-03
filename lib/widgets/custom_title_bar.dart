@@ -68,10 +68,16 @@ class _CustomTitleBarState extends State<CustomTitleBar> with WindowListener {
       return const SizedBox.shrink();
     }
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final baseColor = widget.backgroundColor ?? Theme.of(context).colorScheme.primary;
+    final titleBarColor = isDark
+        ? Color.lerp(baseColor, Colors.black, 0.5) ?? baseColor
+        : baseColor;
+
     return Container(
       height: 32,
       decoration: BoxDecoration(
-        color: widget.backgroundColor ?? const Color(0xFF6A1B9A),
+        color: titleBarColor,
         border: Border(
           bottom: BorderSide(
             color: Colors.black.withValues(alpha: 0.1),

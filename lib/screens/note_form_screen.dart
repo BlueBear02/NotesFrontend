@@ -495,7 +495,7 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
         }
       },
       child: Scaffold(
-      backgroundColor: const Color(0xFFF8F9FA),
+      backgroundColor: Theme.of(context).colorScheme.surface,
       appBar: AppBar(
         title: Row(
           children: [
@@ -625,7 +625,7 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
             // Content editor
             Expanded(
               child: Container(
-                color: const Color(0xFFF8F9FA),
+                color: Theme.of(context).colorScheme.surface,
                 child: Padding(
                   padding: EdgeInsets.only(
                     left: 16.0,
