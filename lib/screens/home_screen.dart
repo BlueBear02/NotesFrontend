@@ -11,6 +11,7 @@ import '../services/preferences_service.dart';
 import '../widgets/custom_title_bar.dart';
 import 'note_form_screen.dart';
 import 'desktop_notes_screen.dart';
+import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -582,6 +583,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Text(_sortOrder == 'asc' ? 'Ascending' : 'Descending'),
               ),
             ],
+          ),
+          // Settings button
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: 'Settings',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const SettingsScreen()),
+              );
+            },
           ),
         ],
       ),

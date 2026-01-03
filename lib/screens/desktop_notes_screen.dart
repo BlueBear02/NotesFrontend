@@ -9,6 +9,7 @@ import '../services/database_helper.dart';
 import '../services/sync_service.dart';
 import '../services/preferences_service.dart';
 import '../widgets/custom_title_bar.dart';
+import 'home_screen.dart';
 
 class DesktopNotesScreen extends StatefulWidget {
   final Note? initialNote;
@@ -317,6 +318,11 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
     if (_autoSaveTimer?.isActive ?? false) {
       _autoSaveTimer?.cancel();
       await _saveCurrentNote();
+    }
+
+    // Save this as the last opened note
+    if (note.id != null) {
+      await _prefsService.setLastOpenedNoteId(note.id!);
     }
 
     // Remove listeners temporarily
@@ -1043,7 +1049,15 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
               // Otherwise exit the screen
               _onWillPop().then((shouldPop) {
                 if (shouldPop && context.mounted) {
-                  Navigator.of(context).pop(_showHiddenNotes);
+                  // Check if we can pop (i.e., there's a previous screen)
+                  if (Navigator.of(context).canPop()) {
+                    Navigator.of(context).pop(_showHiddenNotes);
+                  } else {
+                    // No previous screen, navigate to home screen grid
+                    Navigator.of(context).pushReplacement(
+                      MaterialPageRoute(builder: (context) => const HomeScreen()),
+                    );
+                  }
                 }
               });
             }

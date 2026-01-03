@@ -4,6 +4,11 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'dart:io' show Platform;
 import 'package:window_manager/window_manager.dart';
 import 'screens/home_screen.dart';
+import 'screens/desktop_notes_screen.dart';
+import 'screens/note_form_screen.dart';
+import 'services/preferences_service.dart';
+import 'services/database_helper.dart';
+import 'models/note.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -46,10 +51,98 @@ class MainApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
+    return MaterialApp(
       title: 'Notepad+++',
       debugShowCheckedModeBanner: false,
-      home: HomeScreen(),
+      home: const InitialScreen(),
     );
+  }
+}
+
+class InitialScreen extends StatefulWidget {
+  const InitialScreen({super.key});
+
+  @override
+  State<InitialScreen> createState() => _InitialScreenState();
+}
+
+class _InitialScreenState extends State<InitialScreen> {
+  final PreferencesService _prefsService = PreferencesService.instance;
+  final DatabaseHelper _dbHelper = DatabaseHelper.instance;
+  bool _isLoading = true;
+  Widget? _homeWidget;
+
+  @override
+  void initState() {
+    super.initState();
+    _determineHomeScreen();
+  }
+
+  Future<void> _determineHomeScreen() async {
+    final defaultHomeScreen = await _prefsService.getDefaultHomeScreen();
+
+    Widget home;
+
+    switch (defaultHomeScreen) {
+      case 'empty_note':
+        // Open directly to a new empty note
+        if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+          home = const DesktopNotesScreen(createNew: true);
+        } else {
+          // Mobile uses NoteFormScreen for new notes
+          home = const NoteFormScreen();
+        }
+        break;
+
+      case 'last_opened':
+        // Try to open the last opened note
+        final lastNoteId = await _prefsService.getLastOpenedNoteId();
+        if (lastNoteId != null) {
+          try {
+            final notes = await _dbHelper.readAll();
+            final note = notes.firstWhere((n) => n.id == lastNoteId);
+            if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+              home = DesktopNotesScreen(initialNote: note);
+            } else {
+              // Mobile uses NoteFormScreen for editing
+              home = NoteFormScreen(note: note);
+            }
+          } catch (e) {
+            // Note not found, fall back to grid
+            home = const HomeScreen();
+          }
+        } else {
+          // No last note, fall back to grid
+          home = const HomeScreen();
+        }
+        break;
+
+      case 'grid':
+      default:
+        // Default grid view
+        home = const HomeScreen();
+        break;
+    }
+
+    setState(() {
+      _homeWidget = home;
+      _isLoading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFF8F9FA),
+        body: Center(
+          child: CircularProgressIndicator(
+            color: Color(0xFF6A1B9A),
+          ),
+        ),
+      );
+    }
+
+    return _homeWidget ?? const HomeScreen();
   }
 }

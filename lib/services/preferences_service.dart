@@ -2,6 +2,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class PreferencesService {
   static const String _selectedCategoriesKey = 'selected_categories';
+  static const String _defaultHomeScreenKey = 'default_home_screen';
+  static const String _lastOpenedNoteIdKey = 'last_opened_note_id';
 
   static PreferencesService? _instance;
   static PreferencesService get instance {
@@ -25,5 +27,31 @@ class PreferencesService {
   Future<void> clearSelectedCategories() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_selectedCategoriesKey);
+  }
+
+  // Default home screen preference
+  Future<void> setDefaultHomeScreen(String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_defaultHomeScreenKey, value);
+  }
+
+  Future<String> getDefaultHomeScreen() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_defaultHomeScreenKey) ?? 'grid';
+  }
+
+  // Last opened note preference
+  Future<void> setLastOpenedNoteId(int? noteId) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (noteId != null) {
+      await prefs.setInt(_lastOpenedNoteIdKey, noteId);
+    } else {
+      await prefs.remove(_lastOpenedNoteIdKey);
+    }
+  }
+
+  Future<int?> getLastOpenedNoteId() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_lastOpenedNoteIdKey);
   }
 }

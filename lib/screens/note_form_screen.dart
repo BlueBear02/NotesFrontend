@@ -6,6 +6,8 @@ import 'package:fleather/fleather.dart';
 import '../models/note.dart';
 import '../services/api_service.dart';
 import '../services/database_helper.dart';
+import '../services/preferences_service.dart';
+import 'home_screen.dart';
 
 class NoteFormScreen extends StatefulWidget {
   final Note? note; // If null, create mode. If not null, edit mode.
@@ -23,6 +25,7 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
   late FleatherController _fleatherController;
   final ApiService _apiService = ApiService.instance;
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
+  final PreferencesService _prefsService = PreferencesService.instance;
   final FocusNode _editorFocusNode = FocusNode();
   bool _isSaving = false;
   bool _isFavourite = false;
@@ -46,6 +49,11 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
       _categoryController.text = _currentNote!.category ?? '';
       _isFavourite = _currentNote!.isFavourite;
       _isHidden = _currentNote!.isHidden;
+
+      // Save this as the last opened note
+      if (_currentNote!.id != null) {
+        _prefsService.setLastOpenedNoteId(_currentNote!.id!);
+      }
       // Load content as Delta JSON
       try {
         final deltaJson = _currentNote!.getContentAsDelta();
@@ -475,7 +483,15 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
 
         final shouldPop = await _onWillPop();
         if (shouldPop && context.mounted) {
-          Navigator.of(context).pop(true); // Pass true to indicate note was modified
+          // Check if we can pop (i.e., there's a previous screen)
+          if (Navigator.of(context).canPop()) {
+            Navigator.of(context).pop(true); // Pass true to indicate note was modified
+          } else {
+            // No previous screen, navigate to home screen grid
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (context) => const HomeScreen()),
+            );
+          }
         }
       },
       child: Scaffold(
