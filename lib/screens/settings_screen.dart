@@ -129,8 +129,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           title: const Text('Notes Grid'),
                           subtitle: const Text('Show all your notes in a grid'),
                           value: 'grid',
-                          selected: _defaultHomeScreen == 'grid',
-                          toggleable: true,
+                          groupValue: _defaultHomeScreen,
                           // ignore: deprecated_member_use
                           onChanged: (value) {
                             if (value != null) _saveDefaultHomeScreen(value);
@@ -141,8 +140,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           title: const Text('Empty Note'),
                           subtitle: const Text('Start with a blank note ready to write'),
                           value: 'empty_note',
-                          selected: _defaultHomeScreen == 'empty_note',
-                          toggleable: true,
+                          groupValue: _defaultHomeScreen,
                           // ignore: deprecated_member_use
                           onChanged: (value) {
                             if (value != null) _saveDefaultHomeScreen(value);
@@ -153,8 +151,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           title: const Text('Last Opened Note'),
                           subtitle: const Text('Continue where you left off'),
                           value: 'last_opened',
-                          selected: _defaultHomeScreen == 'last_opened',
-                          toggleable: true,
+                          groupValue: _defaultHomeScreen,
                           // ignore: deprecated_member_use
                           onChanged: (value) {
                             if (value != null) _saveDefaultHomeScreen(value);
