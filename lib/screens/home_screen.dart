@@ -59,6 +59,27 @@ class _HomeScreenState extends State<HomeScreen> {
     await _prefsService.saveSelectedCategories(_selectedCategories);
   }
 
+  String _getDisplayTitle(Note note) {
+    if (note.title.trim().isNotEmpty) {
+      return note.title;
+    }
+    // Generate title from content for display
+    try {
+      final deltaJson = note.getContentAsDelta();
+      final doc = ParchmentDocument.fromJson(jsonDecode(deltaJson));
+      final plainText = doc.toPlainText().trim();
+      if (plainText.isEmpty) {
+        return 'Untitled';
+      }
+      final title = plainText.length > 50
+          ? '${plainText.substring(0, 50)}...'
+          : plainText;
+      return title.replaceAll('\n', ' ');
+    } catch (e) {
+      return 'Untitled';
+    }
+  }
+
   Future<void> _syncInBackground() async {
     // Skip sync UI entirely if API is not configured (local-only mode)
     if (!ApiService.isConfigured) {
@@ -114,20 +135,34 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _extractCategories() {
-    final categories = _notes
+    // Filter notes based on hidden status first
+    final visibleNotes = _showHiddenNotes
+        ? _notes.where((note) => note.isHidden)
+        : _notes.where((note) => !note.isHidden);
+
+    final categories = visibleNotes
         .where((note) => note.category != null && note.category!.isNotEmpty)
         .map((note) => note.category!)
         .toSet();
 
-    // Add "Uncategorised" if there are notes without a category
-    final hasUncategorised = _notes.any((note) => note.category == null || note.category!.isEmpty);
+    // Add "Uncategorised" if there are notes without a category in the visible notes
+    final hasUncategorised = visibleNotes.any((note) => note.category == null || note.category!.isEmpty);
     if (hasUncategorised) {
       categories.add('Uncategorised');
     }
 
+    // Check if we need to remove invalid categories BEFORE modifying
+    final invalidCategories = _selectedCategories.where((cat) => !categories.contains(cat)).toSet();
+
     setState(() {
       _availableCategories = categories;
+      _selectedCategories.removeWhere((cat) => !categories.contains(cat));
     });
+
+    // Save updated selected categories if any were removed
+    if (invalidCategories.isNotEmpty) {
+      _saveSelectedCategories();
+    }
   }
 
   List<Note> get _filteredAndSortedNotes {
@@ -435,6 +470,7 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _showHiddenNotes = true;
         });
+        _extractCategories();
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -450,6 +486,7 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _showHiddenNotes = false;
       });
+      _extractCategories();
     }
   }
 
@@ -633,7 +670,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                       children: [
                                         Expanded(
                                           child: Text(
-                                            note.title,
+                                            _getDisplayTitle(note),
                                             style: const TextStyle(
                                               fontWeight: FontWeight.bold,
                                               fontSize: 18,

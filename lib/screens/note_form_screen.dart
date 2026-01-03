@@ -216,10 +216,31 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
     final deltaJson = jsonEncode(_fleatherController.document.toDelta().toJson());
     final category = _categoryController.text.trim().isEmpty ? null : _categoryController.text.trim();
 
+    // Generate title from content if title is empty
+    String title = _titleController.text.trim();
+    if (title.isEmpty) {
+      final plainText = _fleatherController.document.toPlainText().trim();
+      if (plainText.isEmpty) {
+        // Nothing to save - both title and content are empty
+        if (mounted) {
+          setState(() {
+            _isSaving = false;
+          });
+        }
+        return;
+      }
+      // Use first 50 characters of content as title
+      title = plainText.length > 50
+          ? '${plainText.substring(0, 50)}...'
+          : plainText;
+      // Remove newlines from auto-generated title
+      title = title.replaceAll('\n', ' ');
+    }
+
     try {
       // TRY BACKEND FIRST
       final backendNote = await _apiService.createNote(
-        _titleController.text,
+        title,
         deltaJson,
         category: category,
         isFavourite: _isFavourite,
@@ -229,7 +250,7 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
       // Backend succeeded! Save to local as already synced
       final createdNote = await _dbHelper.createSynced(
         Note(
-          title: _titleController.text,
+          title: title,
           content: deltaJson,
           category: category,
           isFavourite: _isFavourite,
@@ -249,7 +270,7 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
       // Backend failed (offline or error) - save locally only
       final createdNote = await _dbHelper.create(
         Note(
-          title: _titleController.text,
+          title: title,
           content: deltaJson,
           category: category,
           isFavourite: _isFavourite,
@@ -353,9 +374,30 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
     final deltaJson = jsonEncode(_fleatherController.document.toDelta().toJson());
     final category = _categoryController.text.trim().isEmpty ? null : _categoryController.text.trim();
 
+    // Generate title from content if title is empty
+    String title = _titleController.text.trim();
+    if (title.isEmpty) {
+      final plainText = _fleatherController.document.toPlainText().trim();
+      if (plainText.isEmpty) {
+        // Nothing to save - both title and content are empty
+        if (mounted) {
+          setState(() {
+            _isSaving = false;
+          });
+        }
+        return;
+      }
+      // Use first 50 characters of content as title
+      title = plainText.length > 50
+          ? '${plainText.substring(0, 50)}...'
+          : plainText;
+      // Remove newlines from auto-generated title
+      title = title.replaceAll('\n', ' ');
+    }
+
     try {
       final updatedNote = _currentNote!.copyWith(
-        title: _titleController.text,
+        title: title,
         content: deltaJson,
         category: category,
         isFavourite: _isFavourite,
@@ -368,7 +410,7 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
         try {
           final backendNote = await _apiService.updateNote(
             updatedNote.serverId!,
-            title: _titleController.text,
+            title: title,
             content: deltaJson,
             category: category,
             isFavourite: _isFavourite,
@@ -492,9 +534,7 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
                 ),
                 autofocus: !_isEditMode,
                 validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Please enter a title';
-                  }
+                  // Title is now optional - will be auto-generated from content if empty
                   return null;
                 },
               ),
@@ -571,7 +611,12 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
               child: Container(
                 color: const Color(0xFFF8F9FA),
                 child: Padding(
-                  padding: const EdgeInsets.all(16.0),
+                  padding: EdgeInsets.only(
+                    left: 16.0,
+                    right: 16.0,
+                    top: 16.0,
+                    bottom: MediaQuery.of(context).padding.bottom + 16.0,
+                  ),
                   child: FleatherEditor(
                     controller: _fleatherController,
                     focusNode: _editorFocusNode,

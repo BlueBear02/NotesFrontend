@@ -111,26 +111,65 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
     await _prefsService.saveSelectedCategories(_selectedCategories);
   }
 
+  String _getDisplayTitle(Note note) {
+    if (note.title.trim().isNotEmpty) {
+      return note.title;
+    }
+    // Generate title from content for display
+    try {
+      final deltaJson = note.getContentAsDelta();
+      final doc = ParchmentDocument.fromJson(jsonDecode(deltaJson));
+      final plainText = doc.toPlainText().trim();
+      if (plainText.isEmpty) {
+        return 'Untitled';
+      }
+      final title = plainText.length > 50
+          ? '${plainText.substring(0, 50)}...'
+          : plainText;
+      return title.replaceAll('\n', ' ');
+    } catch (e) {
+      return 'Untitled';
+    }
+  }
+
   void _extractCategories() {
-    final categories = _notes
+    // Filter notes based on hidden status first
+    final visibleNotes = _showHiddenNotes
+        ? _notes.where((note) => note.isHidden)
+        : _notes.where((note) => !note.isHidden);
+
+    final categories = visibleNotes
         .where((note) => note.category != null && note.category!.isNotEmpty)
         .map((note) => note.category!)
         .toSet();
 
-    // Add "Uncategorised" if there are notes without a category
-    final hasUncategorised = _notes.any((note) => note.category == null || note.category!.isEmpty);
+    // Add "Uncategorised" if there are notes without a category in the visible notes
+    final hasUncategorised = visibleNotes.any((note) => note.category == null || note.category!.isEmpty);
     if (hasUncategorised) {
       categories.add('Uncategorised');
     }
 
+    // Debug output
+    print('showHidden: $_showHiddenNotes, available categories: $categories, selected: $_selectedCategories');
+
+    // Check if we need to remove invalid categories BEFORE modifying
+    final invalidCategories = _selectedCategories.where((cat) => !categories.contains(cat)).toSet();
+
     setState(() {
       _availableCategories = categories;
+      _selectedCategories.removeWhere((cat) => !categories.contains(cat));
       // Initialize all categories as expanded
       for (final category in categories) {
         _expandedCategories.putIfAbsent(category, () => true);
       }
       _expandedCategories.putIfAbsent('Uncategorized', () => true);
     });
+
+    // Save updated selected categories if any were removed
+    if (invalidCategories.isNotEmpty) {
+      print('Removing invalid categories: $invalidCategories');
+      _saveSelectedCategories();
+    }
   }
 
   List<Note> get _filteredAndSortedNotes {
@@ -353,13 +392,24 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
   Future<void> _saveCurrentNote() async {
     _autoSaveTimer?.cancel();
 
-    if (_titleController.text.trim().isEmpty) {
-      return; // Silently skip
-    }
-
     // Check if anything actually changed
     final currentContent = jsonEncode(_fleatherController.document.toDelta().toJson());
-    final currentTitle = _titleController.text;
+
+    // Generate title from content if title is empty
+    String currentTitle = _titleController.text.trim();
+    if (currentTitle.isEmpty) {
+      final plainText = _fleatherController.document.toPlainText().trim();
+      if (plainText.isEmpty) {
+        return; // Nothing to save - both title and content are empty
+      }
+      // Use first 50 characters of content as title
+      currentTitle = plainText.length > 50
+          ? '${plainText.substring(0, 50)}...'
+          : plainText;
+      // Remove newlines from auto-generated title
+      currentTitle = currentTitle.replaceAll('\n', ' ');
+    }
+
     final currentCategory = _categoryController.text.trim().isEmpty ? null : _categoryController.text.trim();
 
     if (currentContent == _lastSavedContent &&
@@ -921,6 +971,7 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
             _isCreatingNew = false;
           }
         });
+        _extractCategories();
       } else {
         if (mounted) {
           _showStatus('Authentication failed');
@@ -936,6 +987,7 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
           _isCreatingNew = false;
         }
       });
+      _extractCategories();
     }
   }
 
@@ -1251,7 +1303,7 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
                                                                   ? const Icon(Icons.visibility_off, color: Color(0xFF6A1B9A), size: 18)
                                                                   : null,
                                                           title: Text(
-                                                            note.title,
+                                                            _getDisplayTitle(note),
                                                             maxLines: 1,
                                                             overflow: TextOverflow.ellipsis,
                                                             style: TextStyle(
@@ -1394,6 +1446,12 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
                                     tooltip: _isHidden ? 'Unhide note' : 'Hide note',
                                   ),
                                   const Spacer(),
+                                  if (_selectedNote != null)
+                                    IconButton(
+                                      icon: const Icon(Icons.delete, color: Colors.red, size: 28),
+                                      onPressed: () => _deleteNote(_selectedNote!),
+                                      tooltip: 'Delete note',
+                                    ),
                                   IconButton(
                                     icon: const Icon(Icons.fullscreen, size: 28),
                                     onPressed: () {
@@ -1444,42 +1502,6 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
                                 ),
                               ),
                             ),
-                            // Status bar (no save button, auto-saves)
-                            if (_selectedNote != null)
-                              Container(
-                                padding: const EdgeInsets.all(12.0),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFF8F9FA),
-                                  border: Border(
-                                    top: BorderSide(color: Colors.grey[300]!),
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    TextButton.icon(
-                                      onPressed: () => _deleteNote(_selectedNote!),
-                                      icon: const Icon(Icons.delete, color: Colors.red, size: 18),
-                                      label: const Text('Delete', style: TextStyle(color: Colors.red)),
-                                    ),
-                                    if (_isSaving)
-                                      const Row(
-                                        children: [
-                                          SizedBox(
-                                            width: 14,
-                                            height: 14,
-                                            child: CircularProgressIndicator(strokeWidth: 2),
-                                          ),
-                                          SizedBox(width: 6),
-                                          Text(
-                                            'Saving...',
-                                            style: TextStyle(fontSize: 12, color: Colors.grey),
-                                          ),
-                                        ],
-                                      ),
-                                  ],
-                                ),
-                              ),
                           ],
                         ),
                   ),
@@ -1540,42 +1562,6 @@ class _DesktopNotesScreenState extends State<DesktopNotesScreen> {
             ),
           ),
         ),
-        // Status bar at bottom
-        if (_selectedNote != null)
-          Container(
-            padding: const EdgeInsets.all(12.0),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF8F9FA),
-              border: Border(
-                top: BorderSide(color: Colors.grey[300]!),
-              ),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                TextButton.icon(
-                  onPressed: () => _deleteNote(_selectedNote!),
-                  icon: const Icon(Icons.delete, color: Colors.red, size: 18),
-                  label: const Text('Delete', style: TextStyle(color: Colors.red)),
-                ),
-                if (_isSaving)
-                  const Row(
-                    children: [
-                      SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                      SizedBox(width: 6),
-                      Text(
-                        'Saving...',
-                        style: TextStyle(fontSize: 12, color: Colors.grey),
-                      ),
-                    ],
-                  ),
-              ],
-            ),
-          ),
       ],
     );
   }
